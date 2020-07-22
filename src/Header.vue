@@ -6,14 +6,6 @@
     <!-- setting dialog -->
     <Setting :settingDialog="settingDialog"></Setting>
 
-    <!-- cli button -->
-    <el-tooltip effect="dark" :content="$t('message.redis_console')" placement="bottom">
-      <el-button type="primary" @click="cliDialog.visible = true" plain><i class="fa fa-terminal"></i></el-button>
-    </el-tooltip>
-
-    <!-- cli dialog -->
-    <CliConsole v-if=cliDialog.visible :cliDialog="cliDialog"></CliConsole>
-
     <!-- language select -->
     <el-select v-model="selectedLang" @change="changeLang" placeholder="Language">
       <el-option
@@ -23,13 +15,10 @@
         :value="item.value">
       </el-option>
     </el-select>
-
   </div>
 </template>
 
-
-<script>
-import CliConsole from '@/components/CliConsole';
+<script type="text/javascript">
 import Setting from '@/components/Setting';
 
 export default {
@@ -39,12 +28,14 @@ export default {
       langItems: [
         { value: 'en', label: 'English' },
         { value: 'cn', label: '简体中文' },
+        { value: 'tw', label: '繁體中文' },
+        { value: 'tr', label: 'Türkçe' },
+        { value: 'ru', label: 'Русский' },
       ],
-      cliDialog: { visible: false },
       settingDialog: { visible: false },
     };
   },
-  components: { CliConsole, Setting },
+  components: { Setting },
   methods: {
     changeLang(lang) {
       localStorage.lang = this.selectedLang;

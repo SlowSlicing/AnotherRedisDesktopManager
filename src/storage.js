@@ -1,4 +1,14 @@
 export default {
+  getSetting(key) {
+    let settings = localStorage.getItem('settings');
+    settings = settings ? JSON.parse(settings) : {};
+
+    return key ? settings[key] : settings;
+  },
+  saveSettings(settings) {
+    settings = JSON.stringify(settings);
+    return localStorage.setItem('settings', settings);
+  },
   addConnection(connection) {
     const connections = this.getConnections();
     const key = this.getConnectionKey(connection);
@@ -10,7 +20,6 @@ export default {
     connections[key] = connection;
     this.setConnections(connections);
   },
-
   getConnections(returnList = false) {
     let connections = localStorage.connections || '{}';
 
@@ -23,19 +32,13 @@ export default {
 
     return connections;
   },
-  editConnection(oldConnection, newConnection) {
+  editConnectionByKey(connection, oldKey = '') {
     const connections = this.getConnections();
-    const oldKey = this.getConnectionKey(oldConnection);
-
-    if (!connections[oldKey]) {
-      return false;
-    }
+    const newKey = this.getConnectionKey(connection);
 
     delete connections[oldKey];
+    connections[newKey] = connection;
 
-    const newKey = this.getConnectionKey(newConnection);
-
-    connections[newKey] = newConnection;
     this.setConnections(connections);
   },
   setConnections(connections) {

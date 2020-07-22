@@ -1,67 +1,117 @@
-import redis from 'redis';
-import bluebird from 'bluebird';
+import Redis from 'ioredis';
 import tunnelssh from 'tunnel-ssh';
+const fs = require('fs');
 
-bluebird.promisifyAll(redis);
+// fix ioredis hgetall key has been toString()
+Redis.Command.setReplyTransformer("hgetall", (result) => {
+  let arr = [];
+  for (let i = 0; i < result.length; i += 2) {
+    arr.push([result[i], result[i + 1]]);
+  }
+
+  return arr;
+});
 
 export default {
-  createConnection(host, port, auth, menuIndex = 0) {
+  createConnection(host, port, auth, config) {
     const options = {
-      retry_strategy(options) {
-        console.log(options);
-        alert(options.error);
-      },
-      menu_index: menuIndex,
+      connectTimeout: 3000,
+      retryStrategy: (times) => {return this.retryStragety(times, {host, port})},
+      enableReadyCheck: false,
+      connectionName: config.connectionName ? config.connectionName : null,
       password: auth,
+      tls: config.sslOptions ? this.getTLSOptions(config.sslOptions) : undefined,
     };
 
-    const client = redis.createClient(port, host, options);
+    const clusterOptions = {
+      connectionName: options.connectionName,
+      enableReadyCheck: false,
+      redisOptions: options,
+    };
+
+    const client = config.cluster ?
+                    new Redis.Cluster([{port, host}], clusterOptions) :
+                    new Redis(port, host, options);
 
     return client;
   },
 
-  createSSHConnection(sshOptions, host, port, auth, menuIndex = 0) {
+  createSSHConnection(sshOptions, host, port, auth, config) {
     const options = {
-      retry_strategy(options) {
-        console.log(options);
-        alert(options.error);
-      },
-      menu_index: menuIndex,
+      connectTimeout: 3000,
+      retryStrategy: (times) => {return this.retryStragety(times, {host, port})},
+      enableReadyCheck: false,
+      connectionName: config.connectionName ? config.connectionName : null,
       password: auth,
+      tls: config.sslOptions ? this.getTLSOptions(config.sslOptions) : undefined,
     };
 
-    const config = {
+    const clusterOptions = {
+      connectionName: options.connectionName,
+      enableReadyCheck: false,
+      redisOptions: options,
+    };
+
+    const sshConfig = {
       username: sshOptions.username,
       password: sshOptions.password,
       host: sshOptions.host,
       port: sshOptions.port,
+      readyTimeout: 2000,
       dstHost: host,
       dstPort: port,
       localHost: '127.0.0.1',
       localPort: null,
+      privateKey: sshOptions.privatekey ?
+                  fs.readFileSync(sshOptions.privatekey) : '',
     };
 
-    const sshPromise = new bluebird((resolve, reject) => {
-      tunnelssh(config, function (error, server) {
-        const listenAddress = server.address();
-        console.log('ssh tunnel listening in', listenAddress);
-
-        server.on('error', (error) => {
-          alert(error.message);
-          reject(error);
-        });
-
-        const client = redis.createClient(listenAddress.port, listenAddress.address, options);
-
+    const sshPromise = new Promise((resolve, reject) => {
+      var server = tunnelssh(sshConfig, function (error, server) {
         if (error) {
           reject(error);
         }
         else {
+          const listenAddress = server.address();
+          const client = config.cluster ?
+                          new Redis.Cluster([{port: listenAddress.port, host: listenAddress.address}], clusterOptions) :
+                          new Redis(listenAddress.port, listenAddress.address, options);
           resolve(client);
         }
+      });
+
+      server.on('error', (error) => {
+        alert('SSH Connection Error: ' + error.message);
+        reject(error);
       });
     });
 
     return sshPromise;
+  },
+
+  getTLSOptions(options) {
+    return {
+      ca: options.ca ? fs.readFileSync(options.ca) : '',
+      key: options.key ? fs.readFileSync(options.key) : '',
+      cert: options.cert ? fs.readFileSync(options.cert) : '',
+
+      checkServerIdentity: (servername, cert) => {
+        // skip certificate hostname validation
+        return undefined;
+      },
+      rejectUnauthorized: false,
+    }
+  },
+
+  retryStragety(times, connection) {
+    const maxRetryTimes = 3;
+
+    if (times >= maxRetryTimes) {
+      alert(`${connection.host}:${connection.port}\nToo Many Attempts To Reconnect. Please Check The Server Status!`);
+      return false;
+    }
+
+    // reconnect after
+    return Math.min(times * 200, 1000);
   },
 };

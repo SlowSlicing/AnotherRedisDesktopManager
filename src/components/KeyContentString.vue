@@ -1,68 +1,66 @@
 <template>
-  <div>
+<el-form class='key-content-string'>
+  <!-- key content textarea -->
+  <el-form-item>
+    <FormatViewer
+      ref='formatViewer'
+      :content.sync='content'
+      :binary='binary'
+      float='left'
+      :textrows=12>
+    </FormatViewer>
+  </el-form-item>
 
-    <!-- select view -->
-    <div>
-      <el-form :inline="true" size="small">
-        <el-form-item>
-          <el-select v-model="selectedView" placeholder="View As">
-            <el-option
-              v-for="item in views"
-              :key="item.value"
-              :label="item.text"
-              :value="item.value">
-            </el-option>
-            <span slot="prefix" class="fa fa-sitemap"></span>
-          </el-select>
-        </el-form-item>
-      </el-form>
-    </div>
-
-    <!-- content show -->
-    <div>
-      <component :is="selectedView" :data="$data" :redisKey='redisKey'></component>
-    </div>
-
-  </div>
+  <!-- save btn -->
+  <el-form-item>
+    <el-button type="primary" @click="execSave">{{ $t('message.save') }}</el-button>
+  </el-form-item>
+</el-form>
 </template>
 
 <script>
-import unserialize from 'locutus/php/var/unserialize';
-import StringViewText from '@/components/StringViewText';
-import StringViewJson from '@/components/StringViewJson';
-import StringViewPhpUnserialize from '@/components/StringViewPhpUnserialize';
+import FormatViewer from '@/components/FormatViewer';
 
 export default {
   data() {
     return {
-      selectedView: 'StringViewText',
-      views: [
-        { value: 'StringViewText', text: 'View As Text' },
-        { value: 'StringViewJson', text: 'View As Json' },
-        { value: 'StringViewPhpUnserialize', text: 'View As PHPUnserialize' },
-      ],
       content: '',
-      newKeyParamsReference: this.newKeyParams,
+      binary: false,
     };
   },
-  props: ['redisKey', 'newKeyMode', 'newKeyParams'],
-  components: { StringViewText, StringViewJson, StringViewPhpUnserialize },
+  props: ['client', 'redisKey'],
+  components: { FormatViewer },
   methods: {
     initShow() {
-      if (this.newKeyMode) {
-        return;
-      }
+      this.client.getBuffer(this.redisKey).then((reply) => {
+        this.content = this.$util.bufToString(reply);
+        this.binary = !this.$util.bufVisible(reply);
 
+        this.$refs.formatViewer.autoFormat();
+      });
+    },
+    execSave() {
       const key = this.redisKey;
-      const client = this.$util.get('client');
 
-      if (!key) {
-        return;
-      }
+      this.client.set(
+        key,
+        this.binary ? this.$util.xToBuffer(this.content) : this.content
+      ).then((reply) => {
+        if (reply === 'OK') {
+          this.initShow()
 
-      client.getAsync(key).then((reply) => {
-        console.log(reply);
-        this.content = reply;
+          this.$message.success({
+            message: this.$t('message.modify_success'),
+            duration: 1000,
+          });
+        }
+
+        else {
+          this.$message.error({
+            message: this.$t('message.modify_failed'),
+            duration: 1000,
+          });
+        }
       });
     },
   },
@@ -73,24 +71,14 @@ export default {
 </script>
 
 <style type="text/css">
-  .text-formated-container {
-    border: 1px solid #dcdfe6;
-    min-height: 88px;
-    padding: 5px 15px;
-    line-height: 1.5;
-    border-radius: 5px;
+  .key-content-string .text-formated-container {
+    min-height: 252px;
+  }
+  .key-content-string .el-textarea textarea {
+    font-size: 14px;
   }
 
-  .vjs__tree span {
-    color: #616069;
-  }
-
-  .collapse-container {
-    height: 27px;
-  }
-
-  .collapse-container .collapse-btn {
-    float: right;
-    padding: 9px 0;
+  .key-content-string .format-viewer-container {
+    min-height: 296px;
   }
 </style>

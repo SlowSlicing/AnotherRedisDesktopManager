@@ -1,33 +1,19 @@
 <template>
   <div>
     <div>
-
       <!-- add button -->
       <el-form :inline="true" size="small">
         <el-form-item>
-          <el-button size="small" type="primary" @click="dialogFormVisible = true">{{ $t('message.add_new_line') }}</el-button>
+          <el-button size="small" type="primary" @click='showEditDialog({})'>{{ $t('message.add_new_line') }}</el-button>
         </el-form-item>
       </el-form>
 
-      <!-- add dialog -->
-      <el-dialog :title="$t('message.add_new_line')" :visible.sync="dialogFormVisible">
+      <!-- edit & add dialog -->
+      <el-dialog :title="dialogTitle" :visible.sync="editDialog" @open='openDialog'>
         <el-form>
           <el-form-item label="Value">
-            <el-input v-model="newLineItem.value" autocomplete="off"></el-input>
-          </el-form-item>
-        </el-form>
-
-        <div slot="footer" class="dialog-footer">
-          <el-button @click="dialogFormVisible = false">{{ $t('el.messagebox.cancel') }}</el-button>
-          <el-button type="primary" @click="addLine">{{ $t('el.messagebox.confirm') }}</el-button>
-        </div>
-      </el-dialog>
-
-      <!-- edit dialog -->
-      <el-dialog :title="$t('message.edit_line')" :visible.sync="editDialog">
-        <el-form>
-          <el-form-item label="Value">
-            <el-input type="textarea" :rows="2" v-model="editLineItem.value" autocomplete="off"></el-input>
+            <span v-if='editLineItem.binary' class='content-binary'>Hex</span>
+            <FormatViewer ref='formatViewer' :content.sync='editLineItem.value'></FormatViewer>
           </el-form-item>
         </el-form>
 
@@ -36,21 +22,18 @@
           <el-button type="primary" @click="editLine">{{ $t('el.messagebox.confirm') }}</el-button>
         </div>
       </el-dialog>
-
     </div>
 
     <!-- content table -->
     <el-table
       stripe
-      :data="listData"
-      style="width: 100%"
       size="small"
       border
-      max-height=300
-      >
+      min-height=300
+      :data="listData">
       <el-table-column
         type="index"
-        label="ID"
+        :label="'ID (Total: ' + total + ')'"
         sortable
         width="150">
       </el-table-column>
@@ -59,55 +42,102 @@
         resizable
         sortable
         show-overflow-tooltip
-        label="Value"
-        >
+        label="Value">
       </el-table-column>
 
-      <el-table-column
-        label="Operation"
-        >
+      <el-table-column label="Operation">
         <template slot-scope="scope">
           <el-button type="text" @click="showEditDialog(scope.row)" icon="el-icon-edit" circle></el-button>
           <el-button type="text" @click="deleteLine(scope.row)" icon="el-icon-delete" circle></el-button>
         </template>
       </el-table-column>
-
     </el-table>
+
+    <!-- load more content -->
+    <div class='content-more-container'>
+      <el-button
+        size='mini'
+        @click='loadMore'
+        :icon='loadingIcon'
+        :disabled='loadMoreDisable'
+        class='content-more-btn'>
+        {{ $t('message.load_more_keys') }}
+      </el-button>
+    </div>
   </div>
 </template>
 
 <script>
+import PaginationTable from '@/components/PaginationTable';
+import FormatViewer from '@/components/FormatViewer';
+
+
 export default {
   data() {
     return {
-      dialogFormVisible: false,
+      total: 0,
+      filterValue: '',
       editDialog: false,
       listData: [], // {value: xxx}
-      newLineItem: {},
       beforeEditItem: {},
       editLineItem: {},
+      loadingIcon: '',
+      pageSize: 30,
+      pageIndex: 0,
+      loadMoreDisable: false,
     };
   },
-  props: ['redisKey', 'newKeyParams'],
+  props: ['client', 'redisKey'],
+  components: {PaginationTable, FormatViewer},
+  computed: {
+    dialogTitle() {
+      return this.beforeEditItem.value ? this.$t('message.edit_line') :
+             this.$t('message.add_new_line');
+    },
+  },
   methods: {
-    initShow() {
-      const key = this.newKeyParams.keyName;
-      const client = this.$util.get('client');
+    initShow(resetTable = true) {
+      resetTable && this.resetTable();
+      this.loadingIcon = 'el-icon-loading';
 
-      if (!key) {
-        return;
-      }
+      let start = this.pageSize * this.pageIndex;
+      let end = start + this.pageSize - 1;
 
-      client.lrangeAsync([key, 0, -1]).then((reply) => {
-        console.log(reply);
-
-        const listData = [];
+      this.client.lrangeBuffer([this.redisKey, start, end]).then((reply) => {
+        let listData = [];
 
         for (const i of reply) {
-          listData.push({ value: i });
+          listData.push({
+            value: this.$util.bufToString(i),
+            binary: !this.$util.bufVisible(i),
+          });
         }
 
-        this.listData = listData;
+        this.listData = resetTable ? listData : this.listData.concat(listData);
+        (listData.length < this.pageSize) && (this.loadMoreDisable = true);
+        this.loadingIcon = '';
+      });
+
+      // total lines
+      this.initTotal();
+    },
+    initTotal() {
+      this.client.llen(this.redisKey).then((reply) => {
+        this.total = reply;
+      });
+    },
+    resetTable() {
+      this.listData = [];
+      this.pageIndex = 0;
+      this.loadMoreDisable = false;
+    },
+    loadMore() {
+      this.pageIndex++;
+      this.initShow(false);
+    },
+    openDialog() {
+      this.$nextTick(() => {
+        this.$refs.formatViewer.autoFormat();
       });
     },
     showEditDialog(row) {
@@ -116,40 +146,55 @@ export default {
       this.editDialog = true;
     },
     editLine() {
-      const key = this.newKeyParams.keyName;
-      const client = this.$util.get('client');
-
+      const key = this.redisKey;
+      const client = this.client;
       const before = this.beforeEditItem;
       const after = this.editLineItem;
 
-      console.log('editing...', before, after);
-
-      client.lremAsync(key, 1, before.value).then((reply) => {
-        console.log('lrem...', reply);
-
-        client.rpushAsync(key, after.value).then((reply) => {
-          console.log('rpush...', reply);
-          this.initShow();
-        });
-      });
-
-      this.$message.success({
-        message: `${key} ${this.$t('message.modify_success')}`,
-        duration: 1000,
-      });
-
       this.editDialog = false;
+
+      if (!after.value || before.value == after.value) {
+        return;
+      }
+
+      client.rpush(
+        key,
+        before.binary ? this.$util.xToBuffer(after.value) : after.value
+      ).then((reply) => {
+        // reply return list length if success
+        if (reply > 0) {
+          // edit key remove previous value
+          if (before.value) {
+            client.lrem(
+              key,
+              1,
+              before.binary ? this.$util.xToBuffer(before.value) : before.value
+            ).then((reply) => {
+              this.initShow();
+            });
+          }
+
+          else {
+            this.initShow();
+          }
+
+          this.$message.success({
+            message: this.$t('message.add_success'),
+            duration: 1000,
+          });
+        }
+      });
     },
     deleteLine(row) {
-      this.$confirm(this.$t('message.confirm_to_delete_row_data'), {
-        type: 'warning',
-      }).then(() => {
-        const key = this.newKeyParams.keyName;
-        const client = this.$util.get('client');
-
-        client.lremAsync(key, 1, row.value).then((reply) => {
-          console.log(reply);
-
+      this.$confirm(
+        this.$t('message.confirm_to_delete_row_data'),
+        { type: 'warning' }
+      ).then(() => {
+        this.client.lrem(
+          this.redisKey,
+          1,
+          row.binary ? this.$util.xToBuffer(row.value) : row.value
+        ).then((reply) => {
           if (reply === 1) {
             this.$message.success({
               message: this.$t('message.delete_success'),
@@ -159,46 +204,7 @@ export default {
             this.initShow();
           }
         });
-      });
-    },
-    addLine() {
-      console.log('add line', this.newLineItem);
-
-      const key = this.newKeyParams.keyName;
-      const ttl = this.newKeyParams.keyTTL;
-      const client = this.$util.get('client');
-
-      this.dialogFormVisible = false;
-
-      if (!key) {
-        this.$parent.$parent.$parent.emptyKeyWhenAdding();
-        return false;
-      }
-
-      if (!this.newLineItem.value) {
-        return;
-      }
-
-      client.rpushAsync(key, this.newLineItem.value).then((reply) => {
-        console.log(reply);
-
-        if (reply > 0) {
-          if (ttl > 0) {
-            client.expireAsync(key, ttl).then((reply) => {
-              console.log(`new list key set ttl ${ttl}`, reply);
-            });
-          }
-
-          this.$message.success({
-            message: this.$t('message.add_success'),
-            duration: 1000,
-          });
-
-          this.$parent.$parent.$parent.refreshAfterAdd(key);
-
-          this.initShow();
-        }
-      });
+      }).catch(() => {});
     },
   },
   mounted() {
